@@ -403,6 +403,80 @@ class LibraryManager:
         member.is_active = True
         self.save_all()
         return True, "Member activated successfully"
+
+    def generate_monthly_report(self, year: int, month: int) -> Dict:
+        """Generate a comprehensive monthly report for the library"""
+        # Validate inputs
+        if not (1 <= month <= 12):
+            return {"error": "Invalid month. Must be between 1 and 12"}
+        if not (2000 <= year <= datetime.now().year):
+            return {"error": "Invalid year"}
+        
+        # Define date range for the month
+        start_date = datetime(year, month, 1)
+        if month == 12:
+            end_date = datetime(year + 1, 1, 1)
+        else:
+            end_date = datetime(year, month + 1, 1)
+        
+        # Initialize counters
+        books_borrowed = 0
+        books_returned = 0
+        new_members = 0
+        fines_accumulated = 0.0
+        unique_borrowers = set()
+        genre_stats = defaultdict(int)
+        
+        # Process transactions for the month
+        for txn in self.transactions:
+            txn_date = datetime.strptime(txn.transaction_date, '%Y-%m-%d')
+            
+            if start_date <= txn_date < end_date:
+                if txn.transaction_type == 'borrow':
+                    books_borrowed += 1
+                    unique_borrowers.add(txn.member_id)
+                    
+                    # Track genre popularity
+                    book = self.get_book_by_id(txn.book_id)
+                    if book:
+                        genre_stats[book.genre] += 1
+                    
+                    # Calculate fines for overdue books
+                    if txn.return_date:
+                        return_date = datetime.strptime(txn.return_date, '%Y-%m-%d')
+                        due_date = datetime.strptime(txn.due_date, '%Y-%m-%d')
+                        if return_date > due_date:
+                            days_overdue = (return_date - due_date).days
+                            fines_accumulated += days_overdue * self.FINE_PER_DAY
+                            
+                elif txn.transaction_type == 'return':
+                    books_returned += 1
+        
+        # Count new members for the month
+        for member in self.members:
+            join_date = datetime.strptime(member.join_date, '%Y-%m-%d')
+            if start_date <= join_date < end_date:
+                new_members += 1
+        
+        # Sort genres by popularity
+        top_genres = sorted(genre_stats.items(), key=lambda x: x[1], reverse=True)[:5]
+        
+        # Calculate utilization rate
+        total_copies = sum(book.total_copies for book in self.books)
+        avg_borrowed = books_borrowed / max(1, (end_date - start_date).days)
+        utilization_rate = (avg_borrowed / max(1, total_copies)) * 100 if total_copies > 0 else 0
+        
+        return {
+            'period': f"{start_date.strftime('%B %Y')}",
+            'books_borrowed': books_borrowed,
+            'books_returned': books_returned,
+            'new_members': new_members,
+            'unique_borrowers': len(unique_borrowers),
+            'fines_accumulated': round(fines_accumulated, 2),
+            'top_genres': [{'genre': genre, 'count': count} for genre, count in top_genres],
+            'utilization_rate': round(utilization_rate, 2),
+            'net_circulation': books_borrowed - books_returned
+        }
     
     # ==================== TRANSACTION OPERATIONS ====================
     
